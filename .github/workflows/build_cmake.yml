@@ -34,8 +34,8 @@ jobs:
             environment_script: "C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
           }
           - {
-            name: "Windows Latest MinGW", artifact: "Windows-MinGW.tar.xz",
-            os: windows-latest,
+            name: "Windows 2022 MinGW", artifact: "Windows-MinGW.tar.xz",
+            os: windows-2022,
             build_type: "Release", cc: "gcc", cxx: "g++"
           }
     steps:
