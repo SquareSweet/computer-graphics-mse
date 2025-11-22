@@ -6,6 +6,7 @@
 #include <QOpenGLShaderProgram>
 #include <QVBoxLayout>
 #include <QScreen>
+#include <QSlider>
 
 #include <array>
 
@@ -18,12 +19,16 @@
 namespace
 {
 
-constexpr std::array<GLfloat, 21u> vertices = {
-	0.0f, 0.707f, 1.f, 0.f, 0.f, 0.0f, 0.0f,
-	-0.5f, -0.5f, 0.f, 1.f, 0.f, 0.5f, 1.0f,
-	0.5f, -0.5f, 0.f, 0.f, 1.f, 1.0f, 0.0f,
+constexpr std::array<GLfloat, 8u> vertices = {
+    -1.f,  1.f,
+    -1.f, -1.f,
+     1.f,  1.f,
+     1.f, -1.f
 };
-constexpr std::array<GLuint, 3u> indices = {0, 1, 2};
+constexpr std::array<GLuint, 6u> indices = {
+    0, 1, 2,
+    2, 1, 3
+};
 
 }// namespace
 
@@ -36,8 +41,26 @@ Window::Window() noexcept
 	auto fps = new QLabel(formatFPS(0), this);
 	fps->setStyleSheet("QLabel { color : white; }");
 
+	auto iter_slider = new QSlider(Qt::Horizontal);
+	iter_slider->setRange(1, 200);
+	iter_slider->setValue(max_iter_);
+
+	auto iter_label = new QLabel(QString::number(max_iter_), this);
+    iter_label->setStyleSheet("QLabel { color: white; }");
+
+	QObject::connect(iter_slider, &QSlider::valueChanged, [this, iter_label](int new_val) {
+        this->max_iter_ = new_val;
+        iter_label->setText(QString::number(new_val));
+    });
+
+	auto slider_layout = new QHBoxLayout();
+    slider_layout->addWidget(iter_slider, 1);
+    slider_layout->addWidget(iter_label, 0);
+
 	auto layout = new QVBoxLayout();
-	layout->addWidget(fps, 1);
+	layout->addWidget(fps, 0);
+	layout->addStretch(1);
+    layout->addLayout(slider_layout);
 
 	setLayout(layout);
 
@@ -53,7 +76,6 @@ Window::~Window()
 	{
 		// Free resources with context bounded.
 		const auto guard = bindContext();
-		texture_.reset();
 		program_.reset();
 	}
 }
@@ -62,9 +84,8 @@ void Window::onInit()
 {
 	// Configure shaders
 	program_ = std::make_unique<QOpenGLShaderProgram>(this);
-	program_->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/Shaders/diffuse.vs");
-	program_->addShaderFromSourceFile(QOpenGLShader::Fragment,
-									  ":/Shaders/diffuse.fs");
+	program_->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/Shaders/fractal.vs");
+	program_->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/Shaders/fractal.fs");
 	program_->link();
 
 	// Create VAO object
@@ -83,25 +104,16 @@ void Window::onInit()
 	ibo_.setUsagePattern(QOpenGLBuffer::StaticDraw);
 	ibo_.allocate(indices.data(), static_cast<int>(indices.size() * sizeof(GLuint)));
 
-	texture_ = std::make_unique<QOpenGLTexture>(QImage(":/Textures/voronoi.png"));
-	texture_->setMinMagFilters(QOpenGLTexture::Linear, QOpenGLTexture::Linear);
-	texture_->setWrapMode(QOpenGLTexture::WrapMode::Repeat);
-
 	// Bind attributes
 	program_->bind();
 
 	program_->enableAttributeArray(0);
-	program_->setAttributeBuffer(0, GL_FLOAT, 0, 2, static_cast<int>(7 * sizeof(GLfloat)));
+	program_->setAttributeBuffer(0, GL_FLOAT, 0, 2, static_cast<int>(2 * sizeof(GLfloat)));
 
-	program_->enableAttributeArray(1);
-	program_->setAttributeBuffer(1, GL_FLOAT, static_cast<int>(2 * sizeof(GLfloat)), 3,
-								 static_cast<int>(7 * sizeof(GLfloat)));
-
-	program_->enableAttributeArray(2);
-	program_->setAttributeBuffer(2, GL_FLOAT, static_cast<int>(5 * sizeof(GLfloat)), 2,
-								 static_cast<int>(7 * sizeof(GLfloat)));
-
-	mvpUniform_ = program_->uniformLocation("mvp");
+	loc_center_= program_->uniformLocation("center");
+	loc_zoom_ = program_->uniformLocation("zoom");
+	loc_resolution_ = program_->uniformLocation("resolution");
+	loc_max_iter_ = program_->uniformLocation("max_iter");
 
 	// Release all
 	program_->release();
@@ -126,28 +138,20 @@ void Window::onRender()
 	// Clear buffers
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	// Calculate MVP matrix
-	model_.setToIdentity();
-	model_.translate(0, 0, -2);
-	view_.setToIdentity();
-	const auto mvp = projection_ * view_ * model_;
-
 	// Bind VAO and shader program
 	program_->bind();
 	vao_.bind();
 
-	// Update uniform value
-	program_->setUniformValue(mvpUniform_, mvp);
-
-	// Activate texture unit and bind texture
-	glActiveTexture(GL_TEXTURE0);
-	texture_->bind();
+	// modern uniforms
+	program_->setUniformValue(loc_zoom_, zoom_);
+	program_->setUniformValue(loc_center_, center_);
+	program_->setUniformValue(loc_resolution_, resolution_);
+	program_->setUniformValue(loc_max_iter_, max_iter_);
 
 	// Draw
-	glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, nullptr);
+	glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, nullptr);
 
 	// Release VAO and shader program
-	texture_->release();
 	vao_.release();
 	program_->release();
 
@@ -164,14 +168,60 @@ void Window::onResize(const size_t width, const size_t height)
 {
 	// Configure viewport
 	glViewport(0, 0, static_cast<GLint>(width), static_cast<GLint>(height));
+	resolution_.setX(width);
+	resolution_.setY(height);
+}
 
-	// Configure matrix
-	const auto aspect = static_cast<float>(width) / static_cast<float>(height);
-	const auto zNear = 0.1f;
-	const auto zFar = 100.0f;
-	const auto fov = 60.0f;
-	projection_.setToIdentity();
-	projection_.perspective(fov, aspect, zNear, zFar);
+void Window::wheelEvent(QWheelEvent *event) {
+	const float zoom_factor = 0.01;
+
+	float old_zoom = zoom_;
+	zoom_ *= 1 + event->angleDelta().ry() * zoom_factor;
+
+	QVector2D mouse_pos(event->position().x() / float(resolution_.x()),
+                      	1.0 - event->position().y() / float(resolution_.y()));
+
+    float aspect = resolution_.x() / float(resolution_.y());
+    QVector2D delta(
+        (mouse_pos.x() - 0.5) * old_zoom,
+        (mouse_pos.y() - 0.5) * (old_zoom / aspect)
+    );
+
+    center_ += delta * (1.0 - zoom_ / old_zoom);
+}
+
+void Window::mousePressEvent(QMouseEvent *event) {
+	if (event->button() == Qt::LeftButton) {
+        dragging_ = true;
+        lastMousePos_ = event->pos();
+    }
+}
+
+void Window::mouseReleaseEvent(QMouseEvent *event) {
+	if (event->button() == Qt::LeftButton) {
+        dragging_ = false;
+    }	
+}
+
+void Window::mouseMoveEvent(QMouseEvent *event) {
+	if (!dragging_)
+        return;
+
+    QPoint currentPos = event->pos();
+    QPoint deltaPixels = currentPos - lastMousePos_;
+    lastMousePos_ = currentPos;
+
+    if (resolution_.x() == 0 || resolution_.y() == 0)
+        return;
+
+    float aspect = resolution_.x() / float(resolution_.y());
+
+    QVector2D deltaComplex(
+        -deltaPixels.x() / resolution_.x() * zoom_,
+        deltaPixels.y() / resolution_.y() * (zoom_ / aspect)
+    );
+
+    center_ += deltaComplex;	
 }
 
 Window::PerfomanceMetricsGuard::PerfomanceMetricsGuard(std::function<void()> callback)

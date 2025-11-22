@@ -3,8 +3,8 @@ set(SRCS
     Window.cpp
     Window.h
 
-    Shaders/diffuse.fs
-    Shaders/diffuse.vs
+    Shaders/fractal.fs
+    Shaders/fractal.vs
     Textures/voronoi.png
 
     resources.qrc
