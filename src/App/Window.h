@@ -8,9 +8,15 @@
 #include <QOpenGLShaderProgram>
 #include <QOpenGLTexture>
 #include <QOpenGLVertexArrayObject>
+#include <QPushButton>
+#include <QSlider>
 
 #include <functional>
 #include <memory>
+
+#include "Scene/Scene.h"
+
+enum class CameraMode { ClickToRotate, FreeLook };
 
 class Window final : public fgl::GLWidget
 {
@@ -23,6 +29,12 @@ public: // fgl::GLWidget
 	void onInit() override;
 	void onRender() override;
 	void onResize(size_t width, size_t height) override;
+
+	void mousePressEvent(QMouseEvent * event) override;
+	void mouseReleaseEvent(QMouseEvent * event) override;
+	void mouseMoveEvent(QMouseEvent * event) override;
+	void keyPressEvent(QKeyEvent * event) override;
+	void keyReleaseEvent(QKeyEvent * event) override;
 
 private:
 	class PerfomanceMetricsGuard final
@@ -43,6 +55,7 @@ private:
 
 private:
 	[[nodiscard]] PerfomanceMetricsGuard captureMetrics();
+	void createControlPanel();
 
 signals:
 	void updateUI();
@@ -62,6 +75,7 @@ private:
 	std::unique_ptr<QOpenGLShaderProgram> program_;
 
 	QElapsedTimer timer_;
+	QElapsedTimer fpsTimer_;
 	size_t frameCount_ = 0;
 
 	struct {
@@ -69,4 +83,25 @@ private:
 	} ui_;
 
 	bool animated_ = true;
+
+	std::unique_ptr<Scene> scene_;
+
+	CameraMode cameraMode_ = CameraMode::ClickToRotate;
+	bool rotating_ = false; 
+	QPoint lastMousePos_;
+	bool firstMouse_ = true;
+
+	float morphFactor_ = 0.0f;
+
+	QWidget* controlPanel_ = nullptr;
+
+	QSlider* dirIntensitySlider_ = nullptr;
+
+	QSlider* spotIntensitySlider_ = nullptr;
+	QSlider* spotInnerSlider_ = nullptr;
+	QSlider* spotOuterSlider_ = nullptr;
+	QPushButton* spotColorButton_ = nullptr;
+	QSlider* morphSlider_ = nullptr;
+
+	bool spotLightFollowsCamera_ = false;
 };
